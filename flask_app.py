@@ -14,7 +14,7 @@ def proxy():
         resp = requests.get(target_url)
         
         # Build a response with the same content and content type
-        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        excluded_headers = ['x-frame-options', 'content-security-policy','content-encoding', 'content-length', 'transfer-encoding', 'connection']
         headers = [(name, value) for (name, value) in resp.raw.headers.items()
                    if name.lower() not in excluded_headers]
 

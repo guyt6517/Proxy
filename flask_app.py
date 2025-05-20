@@ -1,5 +1,6 @@
 from flask import Flask, request, Response
 import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -10,20 +11,36 @@ def proxy():
         return "Missing url parameter", 400
 
     try:
-        # Fetch the content from the target URL
+        # Fetch the content
         resp = requests.get(target_url)
-        
-        # Build a response with the same content and content type
-        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'x-frame-options', 'content-security-policy', 'cross-origin-embedder-policy', 'cross-origin-opener-policy']
+        content_type = resp.headers.get('Content-Type', '')
+
+        content = resp.content
+
+        # If it's HTML, parse and strip <script> and <meta http-equiv="refresh">
+        if 'text/html' in content_type:
+            soup = BeautifulSoup(content, 'html.parser')
+
+            # Remove all <script> tags
+            for script in soup.find_all('script'):
+                script.decompose()
+
+            # Remove <meta http-equiv="refresh">
+            for meta in soup.find_all('meta', attrs={'http-equiv': True}):
+                if meta['http-equiv'].lower() == 'refresh':
+                    meta.decompose()
+
+            content = str(soup).encode('utf-8')
+
+        # Build response
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         headers = [(name, value) for (name, value) in resp.raw.headers.items()
                    if name.lower() not in excluded_headers]
 
-        # Add CORS headers
+        # Add CORS header
         headers.append(('Access-Control-Allow-Origin', '*'))
+        headers.append(('Content-Type', content_type))
 
-        return Response(resp.content, resp.status_code, headers)
+        return Response(content, resp.status_code, headers)
     except Exception as e:
         return str(e), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)

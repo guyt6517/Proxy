@@ -43,24 +43,29 @@ def rewrite_html(content, base_url):
 
     return str(soup)
 
-@app.route('/proxy')
+@app.route('/proxy', methods=['GET', 'POST'])
 def proxy():
     target_url = request.args.get('url')
     if not target_url:
         return "Missing url parameter", 400
 
     try:
-        resp = requests.get(target_url, stream=True)
+        if request.method == 'POST':
+            # Forward POST data and headers (excluding Host)
+            headers = {k: v for k, v in request.headers if k.lower() != 'host'}
+            resp = requests.post(target_url, data=request.form, headers=headers, stream=True)
+        else:
+            resp = requests.get(target_url, stream=True)
+
         content_type = resp.headers.get('Content-Type', '')
         content_encoding = resp.headers.get('Content-Encoding', '')
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
 
         if 'text/html' in content_type:
-            # Rewrite HTML content with proxied links
             content = rewrite_html(resp.text, target_url)
             content = content.encode(resp.encoding or 'utf-8')
-            excluded_headers.append('content-encoding')  # exclude this because content is modified
+            excluded_headers.append('content-encoding')
         else:
             content = resp.content
 

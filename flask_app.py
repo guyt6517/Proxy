@@ -1,8 +1,8 @@
-from flask import Flask, request, Response, session #PIP
-import requests #PIP
-from bs4 import BeautifulSoup #PIP
-from urllib.parse import urljoin, quote, unquote, urlparse
 import os
+from flask import Flask, request, Response, session
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, quote, unquote, urlparse
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'fallback-key')
@@ -49,29 +49,44 @@ def proxy():
         headers = {k: v for k, v in request.headers if k.lower() != 'host'}
         data = request.form if method == 'POST' else None
         if method == 'POST':
-            resp = http_session.post(target_url, headers = headers, data = data, allow_redirects=True)
-        else: 
-            resp = http_session.get(target_url, headers = headers, params = request.args, allow_redirects=True)
+            resp = http_session.post(target_url, headers=headers, data=data, allow_redirects=True)
+        else:
+            resp = http_session.get(target_url, headers=headers, params=request.args, allow_redirects=True)
         
         content_type = resp.headers.get('Content-Type', '')
 
-        #if HTML, it rewrites URLs
+        # Fix encoding if needed
+        if resp.encoding is None:
+            resp.encoding = 'utf-8'  # default to utf-8 if unknown
+
+        # If HTML, rewrite URLs
         if 'text/html' in content_type:
             content = rewrite_html(resp.text, target_url)
         else:
             content = resp.content
-        
-        #Build headers
-        excluded = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-        headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded]
-        headers.append(('Access-Control-Allow-Origin', '*'))
-        headers.append(('Content-Type', content_type))
-        headers.append(('X-Frame-Options', 'ALLOWALL'))
-        headers.append(('Content-Security-Policy', "frame-ancestors *"))
-        headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
-        headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
-        headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
 
-        return Response(content, resp.status_code, headers)
+        # Exclude headers that should not be forwarded
+        excluded = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        response_headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded]
+
+        # Ensure Content-Type includes charset for HTML
+        if 'text/html' in content_type:
+            if not any('charset' in v.lower() for (k, v) in response_headers if k.lower() == 'content-type'):
+                response_headers.append(('Content-Type', 'text/html; charset=utf-8'))
+        else:
+            response_headers.append(('Content-Type', content_type))
+
+        # Add CORS and frame headers
+        response_headers.append(('Access-Control-Allow-Origin', '*'))
+        response_headers.append(('X-Frame-Options', 'ALLOWALL'))
+        response_headers.append(('Content-Security-Policy', 'frame-ancestors *'))
+        response_headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
+        response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
+        response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
+
+        return Response(content, resp.status_code, response_headers)
     except Exception as e:
         return f"Proxy error: {str(e)}"
+
+if __name__ == "__main__":
+    app.run(debug=True)

@@ -50,17 +50,15 @@ def proxy():
         return "Missing url parameter", 400
 
     try:
-        # Force GET method for Google searches to avoid 405 errors
         is_google_search = 'google.com/search' in target_url
-
         method = 'GET' if is_google_search else request.method
 
         headers = {k: v for k, v in request.headers if k.lower() != 'host'}
 
         if method == 'POST':
-            resp = requests.post(target_url, data=request.form, headers=headers, stream=True)
+            resp = requests.post(target_url, data=request.form, headers=headers)
         else:
-            resp = requests.get(target_url, headers=headers, stream=True)
+            resp = requests.get(target_url, headers=headers)
 
         content_type = resp.headers.get('Content-Type', '')
         if 'text/html' in content_type:
@@ -70,7 +68,7 @@ def proxy():
             content = resp.content
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-        response_headers = [(name, value) for (name, value) in resp.raw.headers.items()
+        response_headers = [(name, value) for (name, value) in resp.headers.items()
                    if name.lower() not in excluded_headers]
 
         response_headers.append(('Access-Control-Allow-Origin', '*'))
@@ -80,6 +78,7 @@ def proxy():
         response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
         response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
         response_headers.append(('Content-Type', content_type))
+
         content_encoding = resp.headers.get('Content-Encoding', '')
         if content_encoding:
             response_headers.append(('Content-Encoding', content_encoding))

@@ -50,39 +50,41 @@ def proxy():
         return "Missing url parameter", 400
 
     try:
-        if request.method == 'POST':
-            # Forward POST data and headers (excluding Host)
-            headers = {k: v for k, v in request.headers if k.lower() != 'host'}
+        # Force GET method for Google searches to avoid 405 errors
+        is_google_search = 'google.com/search' in target_url
+
+        method = 'GET' if is_google_search else request.method
+
+        headers = {k: v for k, v in request.headers if k.lower() != 'host'}
+
+        if method == 'POST':
             resp = requests.post(target_url, data=request.form, headers=headers, stream=True)
         else:
-            resp = requests.get(target_url, stream=True)
+            resp = requests.get(target_url, headers=headers, stream=True)
 
         content_type = resp.headers.get('Content-Type', '')
-        content_encoding = resp.headers.get('Content-Encoding', '')
-
-        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-
         if 'text/html' in content_type:
             content = rewrite_html(resp.text, target_url)
             content = content.encode(resp.encoding or 'utf-8')
-            excluded_headers.append('content-encoding')
         else:
             content = resp.content
 
-        headers = [(name, value) for (name, value) in resp.raw.headers.items()
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        response_headers = [(name, value) for (name, value) in resp.raw.headers.items()
                    if name.lower() not in excluded_headers]
 
-        headers.append(('Access-Control-Allow-Origin', '*'))
-        headers.append(('X-Frame-Options', 'ALLOWALL'))
-        headers.append(('Content-Security-Policy', 'frame-ancestors *'))
-        headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
-        headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
-        headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
-        headers.append(('Content-Type', content_type))
-        if content_encoding and 'content-encoding' not in excluded_headers:
-            headers.append(('Content-Encoding', content_encoding))
+        response_headers.append(('Access-Control-Allow-Origin', '*'))
+        response_headers.append(('X-Frame-Options', 'ALLOWALL'))
+        response_headers.append(('Content-Security-Policy', 'frame-ancestors *'))
+        response_headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
+        response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
+        response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
+        response_headers.append(('Content-Type', content_type))
+        content_encoding = resp.headers.get('Content-Encoding', '')
+        if content_encoding:
+            response_headers.append(('Content-Encoding', content_encoding))
 
-        return Response(content, resp.status_code, headers)
+        return Response(content, resp.status_code, response_headers)
     except Exception as e:
         return f"Error: {str(e)}", 500
 

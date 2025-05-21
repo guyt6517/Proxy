@@ -2,6 +2,7 @@ from flask import Flask, request, Response, session #PIP
 import requests #PIP
 from bs4 import BeautifulSoup #PIP
 from urllib.parse import urljoin, quote, unquote, urlparse
+import os
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'fallback-key')
@@ -25,7 +26,7 @@ def rewrite_html(content, base_url):
         for element in soup.find_all(tag):
             if element.has_attr(attr):
                 original = urljoin(base_url, element[attr])
-                proxied = f"/proxy?url={quote(original}}"
+                proxied = f"/proxy?url={quote(original)}"
                 element[attr] = proxied
 
             if tag == 'form':

@@ -52,16 +52,18 @@ def proxy():
     try:
         resp = requests.get(target_url, stream=True)
         content_type = resp.headers.get('Content-Type', '')
-        content_encoding = resp.headers.get('Content-Encoding, '')
+        content_encoding = resp.headers.get('Content-Encoding', '')
+
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
 
         if 'text/html' in content_type:
             # Rewrite HTML content with proxied links
             content = rewrite_html(resp.text, target_url)
-            content = content.encode(resp.encoding or 'utf-8')  # encode to bytes
+            content = content.encode(resp.encoding or 'utf-8')
+            excluded_headers.append('content-encoding')  # exclude this because content is modified
         else:
             content = resp.content
 
-        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         headers = [(name, value) for (name, value) in resp.raw.headers.items()
                    if name.lower() not in excluded_headers]
 
@@ -72,7 +74,8 @@ def proxy():
         headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
         headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
         headers.append(('Content-Type', content_type))
-        headers.append(('Content-Encoding', content_encoding))
+        if content_encoding and 'content-encoding' not in excluded_headers:
+            headers.append(('Content-Encoding', content_encoding))
 
         return Response(content, resp.status_code, headers)
     except Exception as e:

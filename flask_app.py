@@ -1,6 +1,3 @@
-ChatGPT
-You said:
-Hey, so I have a script, 
 from flask import Flask, request, Response
 import requests
 

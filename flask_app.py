@@ -46,3 +46,4 @@ def proxy():
         return Response(content, resp.status_code, headers)
     except Exception as e:
         return str(e), 500
+@app.route('/ip')

@@ -1,12 +1,15 @@
 from flask import Flask, request, Response
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, quote, unquote
+from urllib.parse import urljoin, quote
 
 app = Flask(__name__)
 
+PROXY_PREFIX = "https://proxy-made-with-pain.onrender.com/proxy?url="
+
 def rewrite_html(content, base_url):
     soup = BeautifulSoup(content, 'html.parser')
+
     tags_attrs = {
         'a': 'href',
         'img': 'src',
@@ -19,68 +22,61 @@ def rewrite_html(content, base_url):
 
     for tag, attr in tags_attrs.items():
         for element in soup.find_all(tag):
-            if element.has_attr(attr):
-                original_url = urljoin(base_url, element[attr])
-                proxied_url = f"/proxy?url={quote(original_url)}"
+            if not element.has_attr(attr):
+                continue
+
+            original_url = element[attr]
+            absolute_url = urljoin(base_url, original_url)
+
+            if tag in ['img', 'script', 'source', 'link', 'iframe']:
+                # Resources: keep absolute URL, no proxy
+                element[attr] = absolute_url
+            elif tag in ['a', 'form']:
+                # Links and forms: proxy via your proxy URL
+                proxied_url = PROXY_PREFIX + quote(absolute_url)
                 element[attr] = proxied_url
 
-            if tag == 'form':
-                method = element.get('method', '').lower()
-                if method not in ['get', 'post']:
-                    element['method'] = 'post'
+                if tag == 'form':
+                    method = element.get('method', '').lower()
+                    if method not in ['get', 'post']:
+                        element['method'] = 'post'
 
     return str(soup)
 
-@app.route('/proxy', methods=['GET', 'POST'])
+@app.route('/proxy')
 def proxy():
     target_url = request.args.get('url')
     if not target_url:
         return "Missing url parameter", 400
 
-    target_url = unquote(target_url)
-
     try:
-        headers_to_send = {k: v for k, v in request.headers if k.lower() != 'host'}
-
-        if request.method == 'POST':
-            resp = requests.post(target_url, data=request.form, headers=headers_to_send, allow_redirects=True)
-        else:
-            resp = requests.get(target_url, headers=headers_to_send, params=request.args, allow_redirects=True)
-
+        resp = requests.get(target_url, stream=True)
         content_type = resp.headers.get('Content-Type', '')
+        content_encoding = resp.headers.get('Content-Encoding, '')
 
-        # requests auto-decompresses content if stream=False (default)
         if 'text/html' in content_type:
-            # Rewrite the HTML content and then encode to bytes
-            rewritten = rewrite_html(resp.text, target_url)
-            content = rewritten.encode('utf-8')
+            # Rewrite HTML content with proxied links
+            content = rewrite_html(resp.text, target_url)
+            content = content.encode(resp.encoding or 'utf-8')  # encode to bytes
         else:
             content = resp.content
 
-        # Exclude hop-by-hop and content-encoding headers
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-        headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_headers]
+        headers = [(name, value) for (name, value) in resp.raw.headers.items()
+                   if name.lower() not in excluded_headers]
 
-        # Add proxy-specific headers
         headers.append(('Access-Control-Allow-Origin', '*'))
         headers.append(('X-Frame-Options', 'ALLOWALL'))
         headers.append(('Content-Security-Policy', 'frame-ancestors *'))
         headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
         headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
         headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
-
-        # Add/update Content-Length header to match the content length
-        headers = [(k, v) for k, v in headers if k.lower() != 'content-length']
-        headers.append(('Content-Length', str(len(content))))
-
-        # Ensure Content-Type header exists (especially for rewritten HTML)
-        if not any(k.lower() == 'content-type' for k, v in headers):
-            headers.append(('Content-Type', content_type if content_type else 'application/octet-stream'))
+        headers.append(('Content-Type', content_type))
+        headers.append(('Content-Encoding', content_encoding))
 
         return Response(content, resp.status_code, headers)
-
     except Exception as e:
-        return f"Proxy error: {str(e)}", 500
+        return f"Error: {str(e)}", 500
 
 if __name__ == '__main__':
     app.run(debug=True)

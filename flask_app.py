@@ -40,28 +40,28 @@ def proxy():
     target_url = unquote(target_url)
 
     try:
-        # Support POST and GET requests for proxying forms, etc.
+        headers_to_send = {k: v for k, v in request.headers if k.lower() != 'host'}
+
         if request.method == 'POST':
-            resp = requests.post(target_url, data=request.form, headers={k: v for k, v in request.headers if k.lower() != 'host'}, allow_redirects=True)
+            resp = requests.post(target_url, data=request.form, headers=headers_to_send, allow_redirects=True)
         else:
-            resp = requests.get(target_url, headers={k: v for k, v in request.headers if k.lower() != 'host'}, params=request.args, allow_redirects=True)
+            resp = requests.get(target_url, headers=headers_to_send, params=request.args, allow_redirects=True)
 
         content_type = resp.headers.get('Content-Type', '')
 
-        # Fix encoding if unknown
-        if resp.encoding is None:
-            resp.encoding = 'utf-8'
-
+        # requests auto-decompresses content if stream=False (default)
         if 'text/html' in content_type:
-            content = rewrite_html(resp.text, target_url)
+            # Rewrite the HTML content and then encode to bytes
+            rewritten = rewrite_html(resp.text, target_url)
+            content = rewritten.encode('utf-8')
         else:
             content = resp.content
 
+        # Exclude hop-by-hop and content-encoding headers
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-        headers = [(name, value) for (name, value) in resp.raw.headers.items()
-                   if name.lower() not in excluded_headers]
+        headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_headers]
 
-        # Add CORS and framing headers
+        # Add proxy-specific headers
         headers.append(('Access-Control-Allow-Origin', '*'))
         headers.append(('X-Frame-Options', 'ALLOWALL'))
         headers.append(('Content-Security-Policy', 'frame-ancestors *'))
@@ -69,11 +69,13 @@ def proxy():
         headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
         headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
 
-        # Ensure Content-Type header is present and correct
-        if 'text/html' in content_type and not any(k.lower() == 'content-type' for k, v in headers):
-            headers.append(('Content-Type', 'text/html; charset=utf-8'))
-        elif not any(k.lower() == 'content-type' for k, v in headers):
-            headers.append(('Content-Type', content_type))
+        # Add/update Content-Length header to match the content length
+        headers = [(k, v) for k, v in headers if k.lower() != 'content-length']
+        headers.append(('Content-Length', str(len(content))))
+
+        # Ensure Content-Type header exists (especially for rewritten HTML)
+        if not any(k.lower() == 'content-type' for k, v in headers):
+            headers.append(('Content-Type', content_type if content_type else 'application/octet-stream'))
 
         return Response(content, resp.status_code, headers)
 

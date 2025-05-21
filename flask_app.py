@@ -38,7 +38,7 @@ def rewrite_html(content, base_url):
 
 @app.route('/proxy', methods=['GET', 'POST'])
 def proxy():
-    target_url = requests.args.get('url')
+    target_url = request.args.get('url')
     if not target_url:
         return "Missing url parameter", 400
     

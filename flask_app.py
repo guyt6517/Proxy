@@ -8,8 +8,6 @@ import gzip
 import zlib
 
 app = Flask(__name__)
-
-# Setup logging to show DEBUG info
 logging.basicConfig(level=logging.DEBUG)
 
 PROXY_PREFIX = "https://proxy-made-with-pain.onrender.com/proxy?url="
@@ -60,26 +58,20 @@ def proxy():
         method = 'GET' if is_google_search else request.method
 
         headers = {k: v for k, v in request.headers if k.lower() != 'host'}
+        headers['Accept-Encoding'] = 'identity'
+        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 
         if method == 'POST':
             resp = requests.post(target_url, data=request.form, headers=headers)
         else:
             resp = requests.get(target_url, headers=headers)
 
-        # DEBUG LOGGING: headers and partial content
-        app.logger.debug(f"Response headers from {target_url}: {resp.headers}")
-        snippet = resp.content[:500]
-        try:
-            snippet_text = snippet.decode(resp.encoding or resp.apparent_encoding or 'utf-8', errors='replace')
-        except Exception:
-            snippet_text = repr(snippet)
-        app.logger.debug(f"Response content snippet from {target_url}:\n{snippet_text}")
+        content_encoding = resp.headers.get('Content-Encoding', '')
+        content_type = resp.headers.get('Content-Type', '')
+        app.logger.debug(f"Content-Encoding: {content_encoding}")
+        app.logger.debug(f"Content-Type: {content_type}")
 
         content = resp.content
-        content_type = resp.headers.get('Content-Type', '')
-
-        # MANUAL decompression fallback if needed
-        content_encoding = resp.headers.get('Content-Encoding', '')
         if content_encoding in ['gzip', 'x-gzip']:
             try:
                 content = gzip.decompress(content)
@@ -90,21 +82,15 @@ def proxy():
                 content = zlib.decompress(content)
             except Exception:
                 try:
-                    # Some servers send raw deflate data without zlib headers
                     content = zlib.decompress(content, -zlib.MAX_WBITS)
                 except Exception as e:
                     app.logger.warning(f"Failed deflate decompress: {e}")
 
         if 'text/html' in content_type:
             encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
-            # Decode bytes -> str
             text_content = content.decode(encoding, errors='replace')
-            # Rewrite URLs in HTML
             rewritten = rewrite_html(text_content, target_url)
             content = rewritten.encode(encoding)
-        else:
-            # Binary or non-html content, pass as-is
-            pass
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         response_headers = [(name, value) for (name, value) in resp.headers.items()
@@ -124,7 +110,6 @@ def proxy():
         app.logger.error(f"Proxy error for URL '{target_url}': {str(e)}", exc_info=True)
 
         safe_error_msg = html.escape(str(e))
-
         error_html = f"""
         <!DOCTYPE html>
         <html lang="en">

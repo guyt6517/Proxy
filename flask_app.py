@@ -33,8 +33,13 @@ def rewrite_html(content, base_url):
             original_url = element[attr]
             absolute_url = urljoin(base_url, original_url)
 
-            if tag in ['img', 'script', 'source', 'link', 'iframe']:
+            if tag in ['img', 'source', 'link', 'iframe']:
                 element[attr] = absolute_url
+            elif tag == 'script':
+                if 'recaptcha' in absolute_url or 'gstatic.com/recaptcha' in absolute_url:
+                    element[attr] = absolute_url  # Allow reCAPTCHA to load directly
+                else:
+                    element[attr] = absolute_url
             elif tag == 'a':
                 proxied_url = PROXY_PREFIX + quote(absolute_url)
                 element[attr] = proxied_url
@@ -97,8 +102,8 @@ def proxy():
             encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
             text_content = content.decode(encoding, errors='replace')
             rewritten = rewrite_html(text_content, target_url)
-            content = rewritten.encode('utf-8')  # Enforce UTF-8 output
-            content_type = 'text/html; charset=utf-8'  # Update content-type
+            content = rewritten.encode('utf-8')
+            content_type = 'text/html; charset=utf-8'
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         response_headers = [(name, value) for (name, value) in resp.headers.items()

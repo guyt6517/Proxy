@@ -2,6 +2,7 @@ from flask import Flask, request, Response
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, quote
+import html
 
 app = Flask(__name__)
 
@@ -38,6 +39,7 @@ def rewrite_html(content, base_url):
                     method = element.get('method', '').lower()
                     if method not in ['get', 'post']:
                         element['method'] = 'post'
+                    element['action'] = proxied_url
 
     return str(soup)
 
@@ -53,7 +55,6 @@ def proxy():
 
         headers = {k: v for k, v in request.headers if k.lower() != 'host'}
 
-        # Removed stream=True to auto-handle decompression
         if method == 'POST':
             resp = requests.post(target_url, data=request.form, headers=headers)
         else:
@@ -61,8 +62,9 @@ def proxy():
 
         content_type = resp.headers.get('Content-Type', '')
         if 'text/html' in content_type:
+            encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
             content = rewrite_html(resp.text, target_url)
-            content = content.encode(resp.encoding or 'utf-8')
+            content = content.encode(encoding)
         else:
             content = resp.content
 
@@ -79,8 +81,28 @@ def proxy():
         response_headers.append(('Content-Type', content_type))
 
         return Response(content, resp.status_code, response_headers)
+
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        app.logger.error(f"Proxy error for URL '{target_url}': {str(e)}", exc_info=True)
+
+        safe_error_msg = html.escape(str(e))
+
+        error_html = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head><title>Proxy Error</title></head>
+        <body>
+            <h1>Proxy Error</h1>
+            <p>An error occurred while processing your request:</p>
+            <pre>{safe_error_msg}</pre>
+            <script>
+                console.error("Proxy error for URL: {target_url}");
+                console.error("Error message: {safe_error_msg}");
+            </script>
+        </body>
+        </html>
+        """
+        return Response(error_html, status=500, content_type='text/html')
 
 if __name__ == '__main__':
     app.run(debug=True)

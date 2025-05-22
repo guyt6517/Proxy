@@ -1,28 +1,15 @@
-from flask import Flask, request, Response, session
+from flask import Flask, request, Response
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, quote
-import uuid
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key'  # replace with a strong secret
 
 PROXY_PREFIX = "https://proxy-made-with-pain.onrender.com/proxy?url="
 
-# Store user sessions here (in-memory; for production use persistent storage)
-user_sessions = {}
-
-def get_user_session():
-    user_id = session.get('user_id')
-    if not user_id:
-        user_id = str(uuid.uuid4())
-        session['user_id'] = user_id
-    if user_id not in user_sessions:
-        user_sessions[user_id] = requests.Session()
-    return user_sessions[user_id]
-
 def rewrite_html(content, base_url):
     soup = BeautifulSoup(content, 'html.parser')
+
     tags_attrs = {
         'a': 'href',
         'img': 'src',
@@ -32,21 +19,26 @@ def rewrite_html(content, base_url):
         'source': 'src',
         'form': 'action'
     }
+
     for tag, attr in tags_attrs.items():
         for element in soup.find_all(tag):
             if not element.has_attr(attr):
                 continue
+
             original_url = element[attr]
             absolute_url = urljoin(base_url, original_url)
+
             if tag in ['img', 'script', 'source', 'link', 'iframe']:
                 element[attr] = absolute_url
             elif tag in ['a', 'form']:
                 proxied_url = PROXY_PREFIX + quote(absolute_url)
                 element[attr] = proxied_url
+
                 if tag == 'form':
                     method = element.get('method', '').lower()
                     if method not in ['get', 'post']:
                         element['method'] = 'post'
+
     return str(soup)
 
 @app.route('/proxy', methods=['GET', 'POST'])
@@ -56,16 +48,16 @@ def proxy():
         return "Missing url parameter", 400
 
     try:
-        user_sess = get_user_session()
-        method = request.method
+        is_google_search = 'google.com/search' in target_url
+        method = 'GET' if is_google_search else request.method
 
-        # Forward headers except Host and Cookie (cookies handled by user_sess)
-        headers = {k: v for k, v in request.headers if k.lower() not in ['host', 'cookie']}
+        headers = {k: v for k, v in request.headers if k.lower() != 'host'}
 
+        # Removed stream=True to auto-handle decompression
         if method == 'POST':
-            resp = user_sess.post(target_url, headers=headers, data=request.form)
+            resp = requests.post(target_url, data=request.form, headers=headers)
         else:
-            resp = user_sess.get(target_url, headers=headers, params=request.args)
+            resp = requests.get(target_url, headers=headers)
 
         content_type = resp.headers.get('Content-Type', '')
         if 'text/html' in content_type:
@@ -75,15 +67,16 @@ def proxy():
             content = resp.content
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-        response_headers = [(name, value) for (name, value) in resp.raw.headers.items() if name.lower() not in excluded_headers]
+        response_headers = [(name, value) for (name, value) in resp.headers.items()
+                            if name.lower() not in excluded_headers]
 
-        # Add your CORS and framing headers
         response_headers.append(('Access-Control-Allow-Origin', '*'))
         response_headers.append(('X-Frame-Options', 'ALLOWALL'))
         response_headers.append(('Content-Security-Policy', 'frame-ancestors *'))
         response_headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
         response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
         response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
+        response_headers.append(('Content-Type', content_type))
 
         return Response(content, resp.status_code, response_headers)
     except Exception as e:

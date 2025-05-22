@@ -97,7 +97,8 @@ def proxy():
             encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
             text_content = content.decode(encoding, errors='replace')
             rewritten = rewrite_html(text_content, target_url)
-            content = rewritten.encode(encoding)
+            content = rewritten.encode('utf-8')  # Enforce UTF-8 output
+            content_type = 'text/html; charset=utf-8'  # Update content-type
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         response_headers = [(name, value) for (name, value) in resp.headers.items()

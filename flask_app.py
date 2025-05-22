@@ -1,4 +1,4 @@
-from flask import Flask, request, Response
+from flask import Flask, request, Response, redirect
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, quote
@@ -33,13 +33,8 @@ def rewrite_html(content, base_url):
             original_url = element[attr]
             absolute_url = urljoin(base_url, original_url)
 
-            if tag in ['img', 'source', 'link', 'iframe']:
+            if tag in ['img', 'script', 'source', 'link', 'iframe']:
                 element[attr] = absolute_url
-            elif tag == 'script':
-                if 'recaptcha' in absolute_url or 'gstatic.com/recaptcha' in absolute_url:
-                    element[attr] = absolute_url  # Allow reCAPTCHA to load directly
-                else:
-                    element[attr] = absolute_url
             elif tag == 'a':
                 proxied_url = PROXY_PREFIX + quote(absolute_url)
                 element[attr] = proxied_url
@@ -101,6 +96,32 @@ def proxy():
         if 'text/html' in content_type:
             encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
             text_content = content.decode(encoding, errors='replace')
+
+            # CAPTCHA detection and dynamic bypass
+            soup = BeautifulSoup(text_content, "html.parser")
+            captcha_form = soup.find("form", id="captcha-form")
+            if captcha_form:
+                try:
+                    q_token = captcha_form.find("input", {"name": "q"})["value"]
+                    continue_url = captcha_form.find("input", {"name": "continue"})["value"]
+                    action_path = captcha_form.get("action", "index")
+                    submit_url = urljoin("https://www.google.com/", action_path)
+
+                    payload = {
+                        "q": q_token,
+                        "continue": continue_url
+                    }
+
+                    captcha_resp = requests.post(submit_url, data=payload, headers=headers, allow_redirects=False)
+                    if 300 <= captcha_resp.status_code < 400 and "Location" in captcha_resp.headers:
+                        return redirect(captcha_resp.headers["Location"])
+                    else:
+                        return Response(captcha_resp.content, captcha_resp.status_code)
+
+                except Exception as e:
+                    app.logger.error(f"CAPTCHA bypass error: {e}")
+                    return Response("Error processing CAPTCHA", status=500)
+
             rewritten = rewrite_html(text_content, target_url)
             content = rewritten.encode('utf-8')
             content_type = 'text/html; charset=utf-8'
@@ -109,13 +130,15 @@ def proxy():
         response_headers = [(name, value) for (name, value) in resp.headers.items()
                             if name.lower() not in excluded_headers]
 
-        response_headers.append(('Access-Control-Allow-Origin', '*'))
-        response_headers.append(('X-Frame-Options', 'ALLOWALL'))
-        response_headers.append(('Content-Security-Policy', 'frame-ancestors *'))
-        response_headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
-        response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
-        response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
-        response_headers.append(('Content-Type', content_type))
+        response_headers.extend([
+            ('Access-Control-Allow-Origin', '*'),
+            ('X-Frame-Options', 'ALLOWALL'),
+            ('Content-Security-Policy', 'frame-ancestors *'),
+            ('Cross-Origin-Embedder-Policy', 'unsafe-none'),
+            ('Cross-Origin-Opener-Policy', 'unsafe-none'),
+            ('Cross-Origin-Resource-Policy', 'cross-origin'),
+            ('Content-Type', content_type)
+        ])
 
         return Response(content, resp.status_code, response_headers)
 

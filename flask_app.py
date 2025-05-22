@@ -43,11 +43,13 @@ def rewrite_html(content, base_url):
                 if method not in ['get', 'post']:
                     element['method'] = 'get'
 
-                # Force the form to submit to the proxy itself
                 element['action'] = '/proxy'
 
-                # Insert a hidden input to carry the true target URL
-                hidden_input = soup.new_tag('input', type='hidden', name='url', value=absolute_url)
+                hidden_input = soup.new_tag('input', attrs={
+                    'type': 'hidden',
+                    'name': 'url',
+                    'value': absolute_url
+                })
                 element.insert(0, hidden_input)
 
     return str(soup)

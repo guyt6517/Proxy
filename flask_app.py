@@ -3,8 +3,12 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, quote
 import html
+import logging
 
 app = Flask(__name__)
+
+# Setup logging to show DEBUG info
+logging.basicConfig(level=logging.DEBUG)
 
 PROXY_PREFIX = "https://proxy-made-with-pain.onrender.com/proxy?url="
 
@@ -59,6 +63,15 @@ def proxy():
             resp = requests.post(target_url, data=request.form, headers=headers)
         else:
             resp = requests.get(target_url, headers=headers)
+
+        # DEBUG LOGGING: headers and partial content
+        app.logger.debug(f"Response headers from {target_url}: {resp.headers}")
+        snippet = resp.content[:500]
+        try:
+            snippet_text = snippet.decode(resp.encoding or resp.apparent_encoding or 'utf-8', errors='replace')
+        except Exception:
+            snippet_text = repr(snippet)
+        app.logger.debug(f"Response content snippet from {target_url}:\n{snippet_text}")
 
         content_type = resp.headers.get('Content-Type', '')
         if 'text/html' in content_type:

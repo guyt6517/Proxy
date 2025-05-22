@@ -4,6 +4,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, quote
 import html
 import logging
+import gzip
+import zlib
 
 app = Flask(__name__)
 
@@ -73,13 +75,36 @@ def proxy():
             snippet_text = repr(snippet)
         app.logger.debug(f"Response content snippet from {target_url}:\n{snippet_text}")
 
+        content = resp.content
         content_type = resp.headers.get('Content-Type', '')
+
+        # MANUAL decompression fallback if needed
+        content_encoding = resp.headers.get('Content-Encoding', '')
+        if content_encoding in ['gzip', 'x-gzip']:
+            try:
+                content = gzip.decompress(content)
+            except Exception as e:
+                app.logger.warning(f"Failed gzip decompress: {e}")
+        elif content_encoding == 'deflate':
+            try:
+                content = zlib.decompress(content)
+            except Exception:
+                try:
+                    # Some servers send raw deflate data without zlib headers
+                    content = zlib.decompress(content, -zlib.MAX_WBITS)
+                except Exception as e:
+                    app.logger.warning(f"Failed deflate decompress: {e}")
+
         if 'text/html' in content_type:
             encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
-            content = rewrite_html(resp.text, target_url)
-            content = content.encode(encoding)
+            # Decode bytes -> str
+            text_content = content.decode(encoding, errors='replace')
+            # Rewrite URLs in HTML
+            rewritten = rewrite_html(text_content, target_url)
+            content = rewritten.encode(encoding)
         else:
-            content = resp.content
+            # Binary or non-html content, pass as-is
+            pass
 
         excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
         response_headers = [(name, value) for (name, value) in resp.headers.items()

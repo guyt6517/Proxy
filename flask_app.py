@@ -35,21 +35,26 @@ def rewrite_html(content, base_url):
 
             if tag in ['img', 'script', 'source', 'link', 'iframe']:
                 element[attr] = absolute_url
-            elif tag in ['a', 'form']:
+            elif tag == 'a':
                 proxied_url = PROXY_PREFIX + quote(absolute_url)
                 element[attr] = proxied_url
+            elif tag == 'form':
+                method = element.get('method', '').lower()
+                if method not in ['get', 'post']:
+                    element['method'] = 'get'
 
-                if tag == 'form':
-                    method = element.get('method', '').lower()
-                    if method not in ['get', 'post']:
-                        element['method'] = 'post'
-                    element['action'] = proxied_url
+                # Force the form to submit to the proxy itself
+                element['action'] = '/proxy'
+
+                # Insert a hidden input to carry the true target URL
+                hidden_input = soup.new_tag('input', type='hidden', name='url', value=absolute_url)
+                element.insert(0, hidden_input)
 
     return str(soup)
 
 @app.route('/proxy', methods=['GET', 'POST'])
 def proxy():
-    target_url = request.args.get('url')
+    target_url = request.args.get('url') or request.form.get('url')
     if not target_url:
         return "Missing url parameter", 400
 
@@ -64,7 +69,7 @@ def proxy():
         if method == 'POST':
             resp = requests.post(target_url, data=request.form, headers=headers)
         else:
-            resp = requests.get(target_url, headers=headers)
+            resp = requests.get(target_url, headers=headers, params=request.args)
 
         content_encoding = resp.headers.get('Content-Encoding', '')
         content_type = resp.headers.get('Content-Type', '')

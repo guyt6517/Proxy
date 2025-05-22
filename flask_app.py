@@ -63,9 +63,9 @@ def proxy():
         headers = {k: v for k, v in request.headers if k.lower() not in ['host', 'cookie']}
 
         if method == 'POST':
-            resp = user_sess.post(target_url, headers=headers, data=request.form, stream=True)
+            resp = user_sess.post(target_url, headers=headers, data=request.form)
         else:
-            resp = user_sess.get(target_url, headers=headers, params=request.args, stream=True)
+            resp = user_sess.get(target_url, headers=headers, params=request.args)
 
         content_type = resp.headers.get('Content-Type', '')
         if 'text/html' in content_type:

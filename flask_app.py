@@ -97,15 +97,14 @@ def proxy():
             encoding = resp.encoding or resp.apparent_encoding or 'utf-8'
             text_content = content.decode(encoding, errors='replace')
 
-            # CAPTCHA detection and dynamic bypass
-            soup = BeautifulSoup(text_content, "html.parser")
-            captcha_form = soup.find("form", id="captcha-form")
+            soup = BeautifulSoup(text_content, 'html.parser')
+            captcha_form = soup.find('form', id='captcha-form')
             if captcha_form:
                 try:
                     q_token = captcha_form.find("input", {"name": "q"})["value"]
                     continue_url = captcha_form.find("input", {"name": "continue"})["value"]
-                    action_path = captcha_form.get("action", "index")
-                    submit_url = urljoin("https://www.google.com/", action_path)
+                    action_path = captcha_form.get("action") or target_url
+                    submit_url = urljoin(target_url, action_path)
 
                     payload = {
                         "q": q_token,
@@ -117,10 +116,8 @@ def proxy():
                         return redirect(captcha_resp.headers["Location"])
                     else:
                         return Response(captcha_resp.content, captcha_resp.status_code)
-
                 except Exception as e:
-                    app.logger.error(f"CAPTCHA bypass error: {e}")
-                    return Response("Error processing CAPTCHA", status=500)
+                    app.logger.warning(f"Failed CAPTCHA form submission: {e}")
 
             rewritten = rewrite_html(text_content, target_url)
             content = rewritten.encode('utf-8')
@@ -130,15 +127,13 @@ def proxy():
         response_headers = [(name, value) for (name, value) in resp.headers.items()
                             if name.lower() not in excluded_headers]
 
-        response_headers.extend([
-            ('Access-Control-Allow-Origin', '*'),
-            ('X-Frame-Options', 'ALLOWALL'),
-            ('Content-Security-Policy', 'frame-ancestors *'),
-            ('Cross-Origin-Embedder-Policy', 'unsafe-none'),
-            ('Cross-Origin-Opener-Policy', 'unsafe-none'),
-            ('Cross-Origin-Resource-Policy', 'cross-origin'),
-            ('Content-Type', content_type)
-        ])
+        response_headers.append(('Access-Control-Allow-Origin', '*'))
+        response_headers.append(('X-Frame-Options', 'ALLOWALL'))
+        response_headers.append(('Content-Security-Policy', 'frame-ancestors *'))
+        response_headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
+        response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
+        response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
+        response_headers.append(('Content-Type', content_type))
 
         return Response(content, resp.status_code, response_headers)
 

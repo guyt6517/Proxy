@@ -15,6 +15,10 @@ PROXY_PREFIX = "https://proxy-made-with-pain.onrender.com/proxy?url="
 def rewrite_html(content, base_url):
     soup = BeautifulSoup(content, 'html.parser')
 
+    # Rewrite CSP meta tags to allow iframe embedding
+    for meta in soup.find_all("meta", {"http-equiv": "Content-Security-Policy"}):
+        meta['content'] = 'frame-ancestors *'
+
     tags_attrs = {
         'a': 'href',
         'img': 'src',
@@ -64,14 +68,22 @@ def proxy():
         is_google_search = 'google.com/search' in target_url
         method = 'GET' if is_google_search else request.method
 
-        headers = {k: v for k, v in request.headers if k.lower() != 'host'}
-        headers['Accept-Encoding'] = 'identity'
-        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+        headers = {
+            'User-Agent': request.headers.get('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'),
+            'Accept': request.headers.get('Accept', '*/*'),
+            'Accept-Language': request.headers.get('Accept-Language', 'en-US,en;q=0.9'),
+            'Referer': request.referrer or '',
+            'Cookie': request.headers.get('Cookie', ''),
+            'Accept-Encoding': 'identity'
+        }
+
+        session = requests.Session()
+        session.headers.update(headers)
 
         if method == 'POST':
-            resp = requests.post(target_url, data=request.form, headers=headers)
+            resp = session.post(target_url, data=request.form)
         else:
-            resp = requests.get(target_url, headers=headers, params=request.args)
+            resp = session.get(target_url, params=request.args)
 
         content_encoding = resp.headers.get('Content-Encoding', '')
         content_type = resp.headers.get('Content-Type', '')
@@ -111,7 +123,7 @@ def proxy():
                         "continue": continue_url
                     }
 
-                    captcha_resp = requests.post(submit_url, data=payload, headers=headers, allow_redirects=False)
+                    captcha_resp = session.post(submit_url, data=payload, allow_redirects=False)
                     if 300 <= captcha_resp.status_code < 400 and "Location" in captcha_resp.headers:
                         return redirect(captcha_resp.headers["Location"])
                     else:
@@ -123,17 +135,25 @@ def proxy():
             content = rewritten.encode('utf-8')
             content_type = 'text/html; charset=utf-8'
 
-        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        # Strip known anti-embedding headers from upstream
+        excluded_headers = [
+            'content-encoding', 'content-length', 'transfer-encoding', 'connection',
+            'x-frame-options', 'content-security-policy'
+        ]
         response_headers = [(name, value) for (name, value) in resp.headers.items()
                             if name.lower() not in excluded_headers]
 
-        response_headers.append(('Access-Control-Allow-Origin', '*'))
-        response_headers.append(('X-Frame-Options', 'ALLOWALL'))
-        response_headers.append(('Content-Security-Policy', 'frame-ancestors *'))
-        response_headers.append(('Cross-Origin-Embedder-Policy', 'unsafe-none'))
-        response_headers.append(('Cross-Origin-Opener-Policy', 'unsafe-none'))
-        response_headers.append(('Cross-Origin-Resource-Policy', 'cross-origin'))
-        response_headers.append(('Content-Type', content_type))
+        # Inject our permissive headers
+        response_headers.extend([
+            ('Access-Control-Allow-Origin', '*'),
+            ('X-Frame-Options', 'ALLOWALL'),
+            ('Content-Security-Policy', 'frame-ancestors *'),
+            ('Cross-Origin-Embedder-Policy', 'unsafe-none'),
+            ('Cross-Origin-Opener-Policy', 'unsafe-none'),
+            ('Cross-Origin-Resource-Policy', 'cross-origin'),
+            ('Referrer-Policy', 'no-referrer'),
+            ('Content-Type', content_type)
+        ])
 
         return Response(content, resp.status_code, response_headers)
 
